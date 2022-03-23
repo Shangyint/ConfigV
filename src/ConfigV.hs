@@ -3,6 +3,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# OPTIONS_GHC -fno-cse #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
 module ConfigV (
   executeLearning,
@@ -40,30 +41,32 @@ executeLearning settings userThresholds = do
   checkSettings settings
   putStrLn $ "Learning on directoty: \n"++(learnTarget settings)
   putStrLn $ "Using file limit: \n"++(show $ learnFileLimit settings)
-  thresholds <- 
+  thresholds <-
     case userThresholds of
       Left rawThresholds -> return rawThresholds
       Right percentageThresholds -> calcThresholds settings percentageThresholds
-  let configVconfig = ConfigVConfiguration { 
-                        optionsSettings = settings, 
+  let configVconfig = ConfigVConfiguration {
+                        optionsSettings = settings,
                         thresholdSettings = thresholds}
   targets <- gatherLearnTargets settings
   let learnedRules = L.learnRules configVconfig targets
       learnedRulesL = toLists learnedRules :: RuleSetLists
-  B.writeFile (cacheLocation settings) $ A.encode learnedRulesL 
-  writeFile ((cacheLocation settings)++".pretty") $ show learnedRulesL 
+  B.writeFile (cacheLocation settings) $ A.encode learnedRulesL
+  writeFile ((cacheLocation settings)++".pretty") $ "The total number of files: " ++ show (length targets) ++ "\n"
+  appendFile ((cacheLocation settings)++".pretty") $ show learnedRulesL
   putStrLn $ "Learned rules: \n"++(ruleSizes learnedRulesL)
   print learnedRulesL
- 
+
   putStrLn $ "Building Implication Lattice: "
   implGraph $ smtRules learnedRules
-  
+  putStrLn $ "Finished whatever"
+
 executeVerification :: Options -> IO ()
 executeVerification settings = do
   rules <- (fromLists. fromJust. A.decode) <$> (B.readFile $ cacheLocation settings)
   degrees <- ((M.fromList. fromJust. A.decode) <$> B.readFile "graphAnalysis/sorted_degrees.json") :: IO (M.Map Keyword Double)
   vFiles <- mapM T.readFile (vFilePaths settings) :: IO [T.Text]
-  let vTargets = zip3 
+  let vTargets = zip3
                (vFilePaths settings) --the names of the files
                vFiles -- the file data
                (repeat $ language settings) :: [ConfigFile Language]
@@ -79,27 +82,27 @@ gatherLearnTargets Learning{..} = do
              _   -> fs''
   let fs = map (learnTarget++) fs'
   fContents <- mapM T.readFile fs
-  let cs = zipWith 
-             (\fName fc -> (fName, fc, language)) 
-             fs 
+  let cs = zipWith
+             (\fName fc -> (fName, fc, language))
+             fs
              fContents
   return cs
 
 vFilePaths :: Options -> [FilePath]
-vFilePaths Verification{..} = 
+vFilePaths Verification{..} =
     if '.' `elem` verifyTarget
     then [verifyTarget]
     else map ((verifyTarget++"/")++) $ u $ listDirectory verifyTarget
 
 runVerify :: a -> RuleSet -> M.Map Keyword Double -> [ConfigFile Language] -> IO Int
-runVerify settings rules ds vTargets  = do  
- 
+runVerify settings rules ds vTargets  = do
+
   let errors = map (verifyOn settings rules) vTargets
-  fitnesses <- 
-    mapM print $ sortOn (\(f,es) -> length es) (zip (map (\(x,y,z)->x) vTargets) errors) 
+  fitnesses <-
+    mapM print $ sortOn (\(f,es) -> length es) (zip (map (\(x,y,z)->x) vTargets) errors)
   --printSummary errors fitnesses
   return 0 -- $ sum fitnesses
-  
+
 
 -- | to check integrity of cache, rerun learning, even if useCache is on, and compare
 --   TODO, only allow this to run if useCache is on?
